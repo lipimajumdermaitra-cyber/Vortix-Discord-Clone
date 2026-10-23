@@ -22,7 +22,17 @@ jobs:
           java-version: '17'
 
       - name: Install Android SDK
-        run: sdkmanager "platforms;android-34" "build-tools;34.0.0"
+        run: |
+          SDKMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          if [ ! -x "$SDKMANAGER" ]; then
+            SDKMANAGER="$(find "$ANDROID_HOME/cmdline-tools" -name sdkmanager -type f 2>/dev/null | head -n 1)"
+          fi
+          if [ -z "$SDKMANAGER" ] || [ ! -x "$SDKMANAGER" ]; then
+            echo "ERROR: sdkmanager not found in $ANDROID_HOME"
+            ls -la "$ANDROID_HOME/cmdline-tools" || true
+            exit 1
+          fi
+          "$SDKMANAGER" "platforms;android-34" "build-tools;34.0.0"
 
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
