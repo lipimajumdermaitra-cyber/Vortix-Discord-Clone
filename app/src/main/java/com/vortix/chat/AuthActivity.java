@@ -64,15 +64,32 @@ public class AuthActivity extends BaseActivity {
             Sfx.play(Sfx.TAP);
         });
         btn.setOnClickListener(v -> {
-            String u = user.getText().toString(), p = pass.getText().toString();
-            String e = register ? Repo.I.register(u, disp.getText().toString(), p) : Repo.I.login(u, p);
-            if (e != null) {
-                err.setText(e);
-                err.setVisibility(android.view.View.VISIBLE);
-                Sfx.play(Sfx.ERROR);
+            String u = user.getText().toString();
+            String p = pass.getText().toString();
+            boolean creating = register;
+
+            btn.setEnabled(false);
+            btn.setText("Please wait...");
+            err.setVisibility(android.view.View.GONE);
+
+            Repo.AuthCallback callback = error -> {
+                btn.setEnabled(true);
+                btn.setText(register ? "Create account" : "Log in");
+
+                if (error != null) {
+                    err.setText(error);
+                    err.setVisibility(android.view.View.VISIBLE);
+                    Sfx.play(Sfx.ERROR);
+                } else {
+                    Sfx.play(Sfx.JOIN);
+                    go();
+                }
+            };
+
+            if (creating) {
+                Repo.I.registerFirebase(u, disp.getText().toString(), p, callback);
             } else {
-                Sfx.play(Sfx.JOIN);
-                go();
+                Repo.I.loginFirebase(u, p, callback);
             }
         });
         setContentView(UI.scroll(this, box));

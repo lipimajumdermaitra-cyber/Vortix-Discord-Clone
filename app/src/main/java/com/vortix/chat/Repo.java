@@ -8,6 +8,7 @@ import android.database.sqlite.SQLiteDatabase;
 import android.database.sqlite.SQLiteOpenHelper;
 import android.os.Handler;
 import android.os.Looper;
+import com.google.firebase.auth.FirebaseAuth;
 
 import java.security.MessageDigest;
 import java.text.SimpleDateFormat;
@@ -113,7 +114,11 @@ public class Repo extends SQLiteOpenHelper {
     // ---------------------------------------------------------------- accounts
     public String me() { return sp.getString("uid", null); }
     public Models.User meUser() { String id = me(); return id == null ? null : user(id); }
-    public void logout() { sp.edit().remove("uid").apply(); }
+    public void logout() {
+        FirebaseAuth.getInstance().signOut();
+        sp.edit().remove("uid").apply();
+        notifyKey("profile");
+    }
 
     private String hash(String salt, String pass) {
         try {
@@ -160,6 +165,174 @@ public class Repo extends SQLiteOpenHelper {
             sp.edit().putString("uid", c.getString(0)).apply();
             return null;
         } finally { c.close(); }
+    }
+
+
+    // Firebase Authentication bridge. SQLite remains a local cache for now.
+    public interface AuthCallback {
+        void onComplete(String error);
+    }
+
+    private String firebaseEmail(String username) {
+        return username.trim().toLowerCase(Locale.ROOT) + "@vortix.app";
+    }
+
+    public void registerFirebase(
+            String username, String display, String pass, AuthCallback callback) {
+        final String un = username == null ? "" :
+                username.trim().toLowerCase(Locale.ROOT);
+        final String name = display == null || display.trim().isEmpty()
+                ? un : display.trim();
+
+        if (!un.matches("[a-z0-9_]{3,20}")) {
+            callback.onComplete("Username: 3-20 letters, numbers or _");
+            return;
+        }
+        if (pass == null || pass.length() < 6) {
+            callback.onComplete("Password needs at least 6 characters");
+            return;
+        }
+
+        Cursor c = getReadableDatabase().rawQuery(
+                "SELECT 1 FROM users WHERE username=?", new String[]{un});
+        boolean taken;
+        try {
+            taken = c.moveToFirst();
+        } finally {
+            c.close();
+        }
+        if (taken) {
+            callback.onComplete("That username is already taken");
+            return;
+        }
+
+        FirebaseAuth.getInstance()
+                .createUserWithEmailAndPassword(firebaseEmail(un), pass)
+                .addOnCompleteListener(task -> {
+                    if (!task.isSuccessful()) {
+                        Exception ex = task.getException();
+                        callback.onComplete(ex == null
+                                ? "Registration failed. Please try again."
+                                : "Registration failed: " + ex.getLocalizedMessage());
+                        return;
+                    }
+
+                    String uid = FirebaseAuth.getInstance().getUid();
+                    String error = uid == null ? "Firebase did not return a user ID."
+                            : cacheFirebaseUser(uid, un, name);
+
+                    if (error != null) {
+                        if (FirebaseAuth.getInstance().getCurrentUser() != null) {
+                            FirebaseAuth.getInstance().getCurrentUser()
+                                    .delete().addOnCompleteListener(cleanup ->
+                                            callback.onComplete(error));
+                        } else {
+                            callback.onComplete(error);
+                        }
+                        return;
+                    }
+                    callback.onComplete(null);
+                });
+    }
+
+    public void loginFirebase(String username, String pass, AuthCallback callback) {
+        final String un = username == null ? "" :
+                username.trim().toLowerCase(Locale.ROOT);
+
+        if (!un.matches("[a-z0-9_]{3,20}")) {
+            callback.onComplete("Enter a valid username");
+            return;
+        }
+        if (pass == null || pass.isEmpty()) {
+            callback.onComplete("Enter your password");
+            return;
+        }
+
+        FirebaseAuth.getInstance()
+                .signInWithEmailAndPassword(firebaseEmail(un), pass)
+                .addOnCompleteListener(task -> {
+                    if (!task.isSuccessful()) {
+                        callback.onComplete("Wrong username or password");
+                        return;
+                    }
+
+                    String uid = FirebaseAuth.getInstance().getUid();
+                    Models.User cached = uid == null ? null : user(uid);
+                    String display = cached == null ? un : cached.display;
+                    String error = uid == null ? "Firebase did not return a user ID."
+                            : cacheFirebaseUser(uid, un, display);
+
+                    if (error != null) {
+                        FirebaseAuth.getInstance().signOut();
+                        callback.onComplete(error);
+                        return;
+                    }
+                    callback.onComplete(null);
+                });
+    }
+
+    private String cacheFirebaseUser(String uid, String username, String display) {
+        SQLiteDatabase db = getWritableDatabase();
+
+        Cursor existing = db.rawQuery(
+                "SELECT 1 FROM users WHERE id=?", new String[]{uid});
+        boolean found;
+        try {
+            found = existing.moveToFirst();
+        } finally {
+            existing.close();
+        }
+
+        if (!found) {
+            Cursor nameCheck = db.rawQuery(
+                    "SELECT 1 FROM users WHERE username=?", new String[]{username});
+            boolean nameTaken;
+            try {
+                nameTaken = nameCheck.moveToFirst();
+            } finally {
+                nameCheck.close();
+            }
+            if (nameTaken) return "That username conflicts with a local profile.";
+
+            int[] accents = Theme.ACCENTS;
+            int accent = accents[rnd.nextInt(accents.length)];
+            long now = System.currentTimeMillis();
+
+            ContentValues values = new ContentValues();
+            values.put("id", uid);
+            values.put("username", username);
+            values.put("display", display);
+            values.put("hash", "");
+            values.put("salt", "");
+            values.put("bio", "");
+            values.put("status", 0);
+            values.put("avatar", "");
+            values.put("accent", accent);
+            values.put("banner", accent);
+            values.put("xp", 0);
+            values.put("bot", 0);
+            values.put("created", now);
+
+            long inserted = db.insertWithOnConflict(
+                    "users", null, values, SQLiteDatabase.CONFLICT_IGNORE);
+            if (inserted == -1) return "Could not save the local profile.";
+        }
+
+        sp.edit().putString("uid", uid).apply();
+
+        Cursor server = db.rawQuery(
+                "SELECT 1 FROM servers WHERE id='s_hq'", null);
+        boolean hasServer;
+        try {
+            hasServer = server.moveToFirst();
+        } finally {
+            server.close();
+        }
+        if (hasServer) addMember(db, "s_hq", uid, "member");
+
+        notifyKey("profile");
+        notifyKey("servers");
+        return null;
     }
 
     private static final String UCOLS = "id,username,display,bio,avatar,status,accent,banner,xp,bot,created";

@@ -1,0 +1,10 @@
+.gradle/
+**/build/
+local.properties
+*.apk
+*.aab
+*.iml
+.idea/
+*.bak
+*.pre-firebase.bak
+tatus --short

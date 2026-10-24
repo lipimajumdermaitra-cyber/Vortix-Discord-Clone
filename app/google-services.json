@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "377736618231",
+    "project_id": "vortix-4395f",
+    "storage_bucket": "vortix-4395f.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:377736618231:android:26e52b80e80b30e34bb3f2",
+        "android_client_info": {
+          "package_name": "com.vortix.chat"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyARnsANiSqGP1AfK2zIYPTS0DWQ9jPq18A"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
